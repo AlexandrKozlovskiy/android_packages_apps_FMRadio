@@ -50,6 +50,8 @@ public interface FmListener {
     // Bundle keys
     String SWITCH_ANTENNA_VALUE = "switch_antenna_value";
     String CALLBACK_FLAG = "callback_flag";
+String KEY_IS_POWER_UP = "key_is_power_up";
+    String KEY_IS_POWER_DOWN = "key_is_power_down";
     String KEY_IS_SWITCH_ANTENNA = "key_is_switch_antenna";
     String KEY_IS_TUNE = "key_is_tune";
     String KEY_TUNE_TO_STATION = "key_tune_to_station";

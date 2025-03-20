@@ -55,6 +55,9 @@ public class FmUtils {
     // Need to check before starting recording and during recording to avoid
     // recording keeps going but there is no free space in sdcard.
     public static final long LOW_SPACE_THRESHOLD = 512 * 1024;
+    // short antenna
+    private static final boolean IS_FM_SHORT_ANTENNA_SUPPORT = SystemProperties.getBoolean(
+            "ro.mtk_fm_short_antenna_support", false);
     // Different city may have different RDS information.
     // We define 100 miles (160934.4m) to distinguish the cities.
     public static final double LOCATION_DISTANCE_EXCEED = 160934.4;
@@ -170,6 +173,14 @@ public class FmUtils {
             Log.e(TAG, "hasEnoughSpace, sdcard may be unmounted:" + recordingSdcard);
         }
         return ret;
+    }
+
+    /**
+     * Check if support short antenna. If true, can play FM without headset
+     * @return true if support
+     */
+    public static boolean isFmShortAntennaSupport() {
+        return IS_FM_SHORT_ANTENNA_SUPPORT;
     }
 
     /**

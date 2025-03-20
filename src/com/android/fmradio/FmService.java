@@ -99,6 +99,9 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
     // Headset
     private static final int HEADSET_PLUG_IN = 1;
 
+    // Short antenna support
+    private static final boolean SHORT_ANNTENNA_SUPPORT = FmUtils.isFmShortAntennaSupport();
+
     // Notification id
     private static final int NOTIFICATION_ID = 1;
     private static final String CHANNEL_ID = "playback";
@@ -283,7 +286,26 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
             } else if (Intent.ACTION_HEADSET_PLUG.equals(action)) {
                 // switch antenna should not impact audio focus status
                 mValueHeadSetPlug = (intent.getIntExtra("state", -1) == HEADSET_PLUG_IN) ? 0 : 1;
+                if (SHORT_ANNTENNA_SUPPORT) {
+                    /*boolean isSwitch = (switchAntenna(mValueHeadSetPlug) == 0) ? true : false;
+                    Log.d(TAG, "onReceive.switch anntenna:isWitch:" + isSwitch);*/
 
+                    // Plug out->Speaker Mode; Plug in->Earphone Mode
+                    boolean plugInEarphone = (0 == mValueHeadSetPlug);
+                    // Need check to switch to earphone mode for audio will
+                    // change to AudioSystem.FORCE_NONE
+                    if (plugInEarphone) {
+                        mForcedUseForMedia = AudioSystem.FORCE_NONE;
+                        mIsSpeakerUsed = false;
+                    }
+                    //setSpeakerPhoneOn(!plugInEarphone);
+                    // Notify UI change to earphone mode, false means not speaker mode
+                    Bundle bundle = new Bundle(2);
+                    bundle.putInt(FmListener.CALLBACK_FLAG,
+                            FmListener.LISTEN_SPEAKER_MODE_CHANGED);
+                    bundle.putBoolean(FmListener.KEY_IS_SPEAKER_MODE, !plugInEarphone);
+                    notifyActivityStateChanged(bundle);
+                } else {
                 // Avoid Service is killed,and receive headset plug in
                 // broadcast again
                 if (!mIsServiceInited) {
@@ -319,7 +341,7 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
                     bundle.putBoolean(FmListener.KEY_IS_SPEAKER_MODE, false);
                     notifyActivityStateChanged(bundle);
                 }
-
+				}
                 switchAntennaAsync(mValueHeadSetPlug);
             }
         }
@@ -410,7 +432,7 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
        // need to create new audio record and audio play back track,
        // because input/output device may be changed.
        if (mAudioRecord != null) {
-                                   if (mAudioRecord.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) mAudioRecord.stop();
+           if(mAudioRecord.getState() ==AudioRecord.RECORDSTATE_RECORDING) mAudioRecord.stop();
            mAudioRecord.release();
            mAudioRecord = null;
        }
@@ -781,7 +803,7 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
         }
 
         // if earphone is not insert, not power up
-        if (!isAntennaAvailable()) {
+        if (!isAntennaAvailable() &&!SHORT_ANNTENNA_SUPPORT) {
             return false;
         }
 
@@ -1832,7 +1854,7 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
             NotificationChannel channel = new NotificationChannel(CHANNEL_ID,
                     getString(R.string.channel_playback_name), NotificationManager.IMPORTANCE_LOW);
             channel.setDescription(getString(R.string.channel_playback_description));
-            channel.setBlockable(true);
+            //channel.setBlockable(true);
             notificationManager.createNotificationChannel(channel);
         }
 
@@ -2014,7 +2036,7 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
         mIsAudioFocusHeld = false;
         if (mIsNativeScanning || mIsNativeSeeking) {
             // make stop scan from activity call to service.
-            // notifyActivityStateChanged(FMRadioListener.LISTEN_SCAN_CANCELED);
+            // notifyActivityStateChanged(FmListener.LISTEN_SCAN_CANCELED);
             stopScan();
         }
 
@@ -2466,8 +2488,13 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
                     // dialog
                     // if earphone plug out and it is not play recorder
                     // state, show plug dialog.
+                 // if not support short antenna, just notify, not need to switch antenna.
+                    if (SHORT_ANNTENNA_SUPPORT) {
+                        isSwitch = (switchAntenna(value) == 0) ? true : false;
+                        Log.d(TAG, "FmServiceHandler.switch anntenna:isSwitch:" + isSwitch);
+                    } else {
                     if (0 == value) {
-                        // powerUpAsync(FMRadioUtils.computeFrequency(mCurrentStation));
+                        // powerUpAsync(FmUtils.computeFrequency(mCurrentStation));
                         bundle.putInt(FmListener.CALLBACK_FLAG,
                                 FmListener.MSGID_SWITCH_ANTENNA);
                         bundle.putBoolean(FmListener.KEY_IS_SWITCH_ANTENNA, true);
@@ -2483,6 +2510,7 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
                             notifyActivityStateChanged(bundle);
                         }
                     }
+					}
                     break;
 
                 // tune to station
@@ -2621,8 +2649,9 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
     private void handlePowerDown() {
         Bundle bundle;
         boolean isPowerdown = powerDown();
-        bundle = new Bundle(1);
+        bundle = new Bundle(2);
         bundle.putInt(FmListener.CALLBACK_FLAG, FmListener.MSGID_POWERDOWN_FINISHED);
+        bundle.putBoolean(FmListener.KEY_IS_POWER_DOWN, isPowerdown);
         notifyActivityStateChanged(bundle);
     }
 
@@ -2636,7 +2665,7 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
         boolean isSwitch = true;
         float curFrequency = bundle.getFloat(FM_FREQUENCY);
 
-        if (!isAntennaAvailable()) {
+        if (!isAntennaAvailable() &&!SHORT_ANNTENNA_SUPPORT) {
             Log.d(TAG, "handlePowerUp, earphone is not ready");
             bundle = new Bundle(2);
             bundle.putInt(FmListener.CALLBACK_FLAG, FmListener.MSGID_SWITCH_ANTENNA);
@@ -2797,4 +2826,95 @@ public class FmService extends Service implements FmRecorder.OnRecorderStateChan
     public void setNotificationClsName(String clsName) {
         mTargetClassName = clsName;
     }
+    /**
+     * Inquiry if fm stereo mono(true, stereo; false mono)
+     * 
+     * @return (true, stereo; false, mono)
+     */
+    public boolean getStereoMono() {
+        Log.d(TAG, "FMRadioService.getStereoMono");
+        return FmNative.stereoMono();
+    }
+
+    /**
+     * Force set to stero/mono mode
+     * 
+     * @param isMono
+     *            (true, mono; false, stereo)
+     * @return (true, success; false, failed)
+     */
+    public boolean setStereoMono(boolean isMono) {
+        Log.d(TAG, "FMRadioService.setStereoMono: isMono=" + isMono);
+        return FmNative.setStereoMono(isMono);
+    }
+    
+    /**
+     * set RSSI, desense RSSI, mute gain soft
+     * @param index flag which will execute
+     * (0:rssi threshold,1:desense rssi threshold,2: SGM threshold)
+     * @param value send to native
+     * @return execute ok or not
+     */
+    public boolean setEmth(int index, int value) {
+        Log.d(TAG, ">>> FMRadioService.setEmth: index=" + index + ",value=" + value);
+        boolean isOk = FmNative.emsetth(index, value);
+        Log.d(TAG, "<<< FMRadioService.setEmth: isOk=" + isOk);
+        return isOk;
+    }
+    
+    /**
+     * send variables to native, and get some variables return.
+     * @param val send to native
+     * @return get value from native
+     */
+    public short[] emcmd(short[] val) {
+        Log.d(TAG, ">>FMRadioService.emcmd: val=" + val);
+        short[] shortCmds = null;
+        shortCmds = FmNative.emcmd(val);
+        Log.d(TAG, "<<FMRadioService.emcmd:" + shortCmds);
+        return shortCmds;
+    }
+
+    /**
+     * Get hardware version not need async
+     */
+    public int[] getHardwareVersion() {
+        return FmNative.getHardwareVersion();
+    }
+
+    /**
+     * Read cap array method not need async
+     */
+    public int getCapArray() {
+        Log.d(TAG, "FMRadioService.readCapArray");
+        if (mPowerStatus != POWER_UP) {
+            Log.w(TAG, "FM is not powered up");
+            return -1;
+        }
+        return FmNative.readCapArray();
+    }
+
+    /**
+     * Get rssi not need async
+     */
+    public int getRssi() {
+        Log.d(TAG, "FMRadioService.readRssi");
+        if (mPowerStatus != POWER_UP) {
+            Log.w(TAG, "FM is not powered up");
+            return -1;
+        }
+        return FmNative.readRssi();
+    }
+
+    /**
+     * read rds bler not need async
+     */
+    public int getRdsBler() {
+        Log.d(TAG, "FMRadioService.readRdsBler");
+        if (mPowerStatus != POWER_UP) {
+            Log.w(TAG, "FM is not powered up");
+            return -1;
+        }
+        return FmNative.readRdsBler();
+	}
 }
